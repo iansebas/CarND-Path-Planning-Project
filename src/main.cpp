@@ -17,7 +17,7 @@
 #define LANE_WITH 4
 #define DELAY 0.02
 #define MPERS_TO_MPH 2.24
-#define MAX_LANE 3
+#define MAX_LANE 2
 #define MAX_SPEED 49.5
 #define MIN_SPEED 0.01
 #define SPEED_STEP 0.25
@@ -211,6 +211,7 @@ class PathPlanner{
     double target_speed = MIN_SPEED;
     int n_waypoints = 50;
     int n_future_states = 0;
+    bool just_changed_lanes = false;
     // Previous path data given to the Planner
     vector<double> previous_path_x;
     vector<double> previous_path_y;
@@ -428,29 +429,41 @@ class PathPlanner{
       return true;
     }
 
-    void change_lanes(){
+    bool change_lanes(){
+
+      if (just_changed_lanes){
+        just_changed_lanes = false;
+        return false;
+      }
+
       double new_target_lane = car.target_lane;
-      if (car.future_state->lane>0 && car.lane >0 && car.target_lane>0){new_target_lane = car.target_lane-1;}
-      if (car.future_state->lane==0 && car.lane==0 && car.target_lane==0 && car.future_state->lane<MAX_LANE && car.lane<MAX_LANE && car.target_lane<MAX_LANE){new_target_lane = car.target_lane+1;}
-      if(validate_target(new_target_lane)){car.target_lane=new_target_lane;}
+      // Try Left
+      if (car.future_state->lane>0 && car.lane >0 && car.target_lane>0){
+        new_target_lane = car.target_lane-1;
+        if(validate_target(new_target_lane)){
+          car.target_lane=new_target_lane;
+          just_changed_lanes = true;
+          return true;}
+      }
+      // Try Right
+      if (car.future_state->lane>=0 && car.lane>=0 && car.target_lane>=0 && car.future_state->lane<MAX_LANE && car.lane<MAX_LANE && car.target_lane<MAX_LANE){
+        new_target_lane = car.target_lane+1;
+        if(validate_target(new_target_lane)){
+          car.target_lane=new_target_lane;
+          just_changed_lanes = true;
+          return true;}
+      }
+      return false;
+      
     }
 
-    bool is_too_close(const state &nearby_car, const state &current_car){
+    bool is_too_close(const state &nearby_car, const state &current_car, double center = 0){
       bool too_close = false;
-      // Past
       if (nearby_car.lane == current_car.lane or nearby_car.future_state->lane == current_car.future_state->lane){
         // Present
-        if ((nearby_car.s - current_car.s < CAR_LENGTH*2) && (0<nearby_car.s - current_car.s)) { too_close = true;}
+        if ((nearby_car.s - current_car.s < CAR_LENGTH*2) && (-center<nearby_car.s - current_car.s)) { too_close = true;}
         // Future
-        if ((nearby_car.future_state->s - current_car.future_state->s < step) && (0<nearby_car.future_state->s - current_car.future_state->s)) { too_close = true;}
-        // cout << "\ncurrent_car.future_state->lane " << current_car.future_state->lane << endl;
-        // cout << "current_car.lane " << current_car.lane << endl;
-        // cout << "nearby_car.future_state->lane " << nearby_car.future_state->lane << endl;
-        // cout << "nearby_car.lane " << nearby_car.lane << endl;
-        // cout << "nearby_car.s - current_car.s " << nearby_car.s - current_car.s << endl;
-        // cout << "(nearby_car.s - current_car.s < CAR_LENGTH*2)" << (nearby_car.s - current_car.s < CAR_LENGTH*2) << endl;
-        // cout << "(0<nearby_car.s - current_car.s)" << (0<nearby_car.s - current_car.s) << endl;
-        // cout << "too_close " << too_close << endl;
+        if ((nearby_car.future_state->s - current_car.future_state->s < step) && (-center<nearby_car.future_state->s - current_car.future_state->s)) { too_close = true;}
       } 
       return too_close;
     }
@@ -463,7 +476,7 @@ class PathPlanner{
       future_car.future_state->d = lane_to_d(new_lane);
       sync_cartesian(future_car);
       sync_cartesian((*future_car.future_state));
-      return is_too_close(nearby_car, future_car);
+      return is_too_close(nearby_car, future_car, CAR_LENGTH*2.5);
     }
 
     void check_nearby(){
@@ -484,13 +497,10 @@ class PathPlanner{
 
       // Action
       if (too_close){
-        // cout<<"TOO CLOSE"<<endl;
-        change_lanes();
-        target_speed -= SPEED_STEP;
-      }else if (target_speed<MAX_SPEED){
-        //cout<<"NOT TOO CLOSE"<<endl;
-        target_speed += SPEED_STEP;
-      }
+        double speed_multiplier = 1;
+        if(change_lanes()){speed_multiplier = 0;}
+        target_speed -= SPEED_STEP*speed_multiplier;
+      }else if (target_speed<MAX_SPEED){ target_speed += SPEED_STEP;}
     }
 
   public:
